@@ -164,6 +164,12 @@ class SftpFileAttrs {
   /// The group ID of the file.
   final int? groupID;
 
+  /// The user name of the file (parsed from longname if available).
+  final String? userName;
+
+  /// The group name of the file (parsed from longname if available).
+  final String? groupName;
+
   /// The mode of the file, including file type and permissions.
   final SftpFileMode? mode;
 
@@ -180,6 +186,8 @@ class SftpFileAttrs {
     this.size,
     this.userID,
     this.groupID,
+    this.userName,
+    this.groupName,
     this.mode,
     this.accessTime,
     this.modifyTime,
@@ -270,12 +278,39 @@ class SftpFileAttrs {
     }
   }
 
+  /// Create a copy of this SftpFileAttrs with additional user/group names
+  SftpFileAttrs copyWith({
+    int? size,
+    int? userID,
+    int? groupID,
+    String? userName,
+    String? groupName,
+    SftpFileMode? mode,
+    int? accessTime,
+    int? modifyTime,
+    Map<String, String>? extended,
+  }) {
+    return SftpFileAttrs(
+      size: size ?? this.size,
+      userID: userID ?? this.userID,
+      groupID: groupID ?? this.groupID,
+      userName: userName ?? this.userName,
+      groupName: groupName ?? this.groupName,
+      mode: mode ?? this.mode,
+      accessTime: accessTime ?? this.accessTime,
+      modifyTime: modifyTime ?? this.modifyTime,
+      extended: extended ?? this.extended,
+    );
+  }
+
   @override
   String toString() {
     final props = <String>[];
     if (size != null) props.add('size: $size');
     if (userID != null) props.add('uid: $userID');
     if (groupID != null) props.add('gid: $groupID');
+    if (userName != null) props.add('user: $userName');
+    if (groupName != null) props.add('group: $groupName');
     if (mode != null) props.add('mode: otc($mode)');
     if (accessTime != null) props.add('atime: $accessTime');
     if (modifyTime != null) props.add('mtime: $modifyTime');
