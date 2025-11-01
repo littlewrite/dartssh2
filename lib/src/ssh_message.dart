@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/src/utils/int.dart';
 import 'package:dartssh2/src/utils/bigint.dart';
-import 'package:dartssh2/src/utils/utf8.dart';
+import 'package:dartssh2/src/utils/utf8.dart' show utf8Encode, smartDecodeString;
 
 abstract class SSHMessage {
   /// Encode the message to SSH encoded data.
@@ -72,11 +72,13 @@ class SSHMessageReader {
   }
 
   String readUtf8() {
-    return utf8.decode(readString());
+    final bytes = readString();
+    // 使用智能解码函数，可以处理各种编码情况（UTF-8, GBK, Latin-1等）
+    return smartDecodeString(bytes);
   }
 
   List<String> readNameList() {
-    final string = utf8.decode(readString());
+    final string = smartDecodeString(readString());
     final list = string.split(',');
     return list;
   }
