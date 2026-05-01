@@ -71,10 +71,8 @@ class SSHMessageReader {
     return value;
   }
 
-  String readUtf8() {
-    final bytes = readString();
-    // 使用智能解码函数，可以处理各种编码情况（UTF-8, GBK, Latin-1等）
-    return smartDecodeString(bytes);
+  String readUtf8({bool allowMalformed = false}) {
+    return utf8.decode(readString(), allowMalformed: allowMalformed);
   }
 
   List<String> readNameList() {

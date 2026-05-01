@@ -28,7 +28,7 @@ SSH and SFTP client written in pure Dart, aiming to be feature-rich as well as e
 -  **Pure Dart**: Working with both Dart VM and Flutter.
 -  **SSH Session**: Executing commands, spawning shells, setting environment variables, pseudo terminals, etc.
 -  **Authentication**: Supports password, private key and interactive authentication method.
--  **Forwarding**: Supports local forwarding and remote forwarding.
+-  **Forwarding**: Supports local forwarding, remote forwarding, and dynamic forwarding (SOCKS5 CONNECT).
 -  **SFTP**: Supports all operations defined in [SFTPv3 protocol](https://datatracker.ietf.org/doc/html/draft-ietf-secsh-filexfer-02) including upload, download, list, link, remove, rename, etc.
 
 ## 🧬 Built with dartssh2
@@ -47,6 +47,10 @@ SSH and SFTP client written in pure Dart, aiming to be feature-rich as well as e
     <td style="text-align: center;">
       <b><a href="https://github.com/hsduren/dartshell">DartShell</a></b>
     </td>
+    <!-- Naviterm -->
+    <td style="text-align: center;">
+      <b><a href="https://github.com/jc-hk-1916/NaviTerm">Naviterm</a></b>
+    </td>
   </tr>
 
   <tr> 
@@ -64,6 +68,12 @@ SSH and SFTP client written in pure Dart, aiming to be feature-rich as well as e
     <!-- dartShell -->
     <td>
       <img src="https://github.com/hsduren/dartshell/blob/main/info1.png" width="300px" alt="dartShell displaying terminal and session information for SSH operations">
+    </td>
+    <!-- NaviTerm -->
+    <td>
+      <a href="https://apps.apple.com/us/app/naviterm-ssh-sftp-tunnels/id6747072398">
+        <img src="https://raw.githubusercontent.com/jc-hk-1916/NaviTerm/main/images/1.png" width="300px" alt="Your all-in-one SSH terminal, SFTP client, and port forwarding tool, built from the ground up for macOS, iPhone, and iPad.">
+      </a>
     </td>
   </tr>
 </table>
@@ -107,21 +117,65 @@ void main() async {
 }
 ```
 
+> Note: `SSHSocket.connect()` uses native TCP sockets (`dart:io`) and is not
+> available on Flutter Web / Dart Web. See [Web support](#web-support) below
+> for browser-compatible transport options.
+
 > `SSHSocket` is an interface and it's possible to implement your own `SSHSocket` if you want to use a different underlying transport rather than standard TCP socket. For example WebSocket or Unix domain socket.
+
+### Web support
+
+Direct native TCP sockets are not available in browsers, so this will fail on
+Flutter Web / Dart Web:
+
+```dart
+await SSHSocket.connect('host', 22);
+```
+
+For web apps, use a custom `SSHSocket` transport over a browser-supported
+channel (for example, a WebSocket tunnel/proxy to your SSH endpoint).
+
+### Customize client SSH identification
+
+If your jump host or SSH gateway restricts client versions, you can customize the
+software version part of the identification string (`SSH-2.0-<ident>`):
+
+```dart
+void main() async {
+  final client = SSHClient(
+    await SSHSocket.connect('localhost', 22),
+    username: '<username>',
+    onPasswordRequest: () => '<password>',
+    ident: 'MyClient_1.0',
+  );
+}
+```
+
+`ident` defaults to `DartSSH_2.0`.
 
 ### Spawn a shell on remote host
 
 ```dart
 void main() async {
   final shell = await client.shell();
-  stdout.addStream(shell.stdout); // listening for stdout
-  stderr.addStream(shell.stderr); // listening for stderr
-  stdin.cast<Uint8List>().listen(shell.write); // writing to stdin
+
+  // Attach local terminal streams only when a terminal is available.
+  // GUI apps on Windows may not have stdin/stdout/stderr attached.
+  final hasTerminal = stdin.hasTerminal && stdout.hasTerminal && stderr.hasTerminal;
+  if (hasTerminal) {
+    stdout.addStream(shell.stdout); // listening for stdout
+    stderr.addStream(shell.stderr); // listening for stderr
+    stdin.cast<Uint8List>().listen(shell.write); // writing to stdin
+  }
 
   await shell.done; // wait for shell to exit
   client.close();
 }
 ```
+
+> Note: The stdin/stdout bridging above is for CLI apps. If your app is launched
+> without a terminal (for example, double-clicking a Windows `.exe`), skip the
+> local stdio wiring and use your own UI/input pipeline.
 
 ### Execute a command on remote host
 
@@ -141,7 +195,51 @@ void main() async {
 }
 ```
 
-> `client.run()` is a convenience method that wraps `client.execute()` for running non-interactive commands.
+> `client.run()` is a convenience method that returns combined output bytes.
+> Use `client.runWithResult()` when you need separate `stdout` / `stderr`
+> streams and command exit metadata (`exitCode` / `exitSignal`).
+
+To also access command exit metadata:
+
+```dart
+void main() async {
+  final result = await client.runWithResult('echo hello');
+  print('exitCode: ${result.exitCode}');
+  print('stdout: ${utf8.decode(result.stdout)}');
+  print('stderr: ${utf8.decode(result.stderr)}');
+}
+```
+
+### End-to-end flow example
+
+Use `example/run_flows.dart` to test the main execution flows in one run:
+
+- `run()`
+- `runWithResult()`
+- `execute()`
+- optional `shell()` via `--shell`
+
+Run it with environment variables:
+
+```sh
+SSH_HOST=test.rebex.net SSH_PORT=22 SSH_USERNAME=demo SSH_PASSWORD=password dart run example/run_flows.dart
+```
+
+Run shell flow too:
+
+```sh
+SSH_HOST=test.rebex.net SSH_PORT=22 SSH_USERNAME=demo SSH_PASSWORD=password dart run example/run_flows.dart --shell
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:SSH_HOST = 'test.rebex.net'
+$env:SSH_PORT = '22'
+$env:SSH_USERNAME = 'demo'
+$env:SSH_PASSWORD = 'password'
+dart run example/run_flows.dart --shell
+```
 
 ### Start a process on remote host
 ```dart
@@ -201,6 +299,40 @@ void main() async {
   }
 }
 ```
+
+### Start a local SOCKS5 proxy through SSH (`ssh -D` style)
+
+```dart
+void main() async {
+  final dynamicForward = await client.forwardDynamic(
+    bindHost: '127.0.0.1',
+    bindPort: 1080,
+    options: const SSHDynamicForwardOptions(
+      handshakeTimeout: Duration(seconds: 10),
+      connectTimeout: Duration(seconds: 15),
+      maxConnections: 128,
+    ),
+    filter: (host, port) {
+      // Optional allow/deny policy.
+      return true;
+    },
+  );
+
+  print('SOCKS5 proxy at ${dynamicForward.host}:${dynamicForward.port}');
+}
+```
+
+This currently supports SOCKS5 `NO AUTH` + `CONNECT`.
+It requires `dart:io` and is not available on web runtimes.
+
+Quick verification from your terminal:
+
+```sh
+curl --proxy socks5h://127.0.0.1:1080 https://ifconfig.me
+```
+
+If the proxy is working, this command returns the public egress IP seen through
+the SSH tunnel.
 
 ### Authenticate with public keys
 
@@ -293,6 +425,71 @@ void main() async {
   final file = await sftp.open('/etc/passwd');
   final content = await file.readBytes();
   print(latin1.decode(content));
+}
+```
+
+### Download remote file (high-level API)
+```dart
+void main() async {
+  final sftp = await client.sftp();
+  final output = File('local_file.txt').openWrite();
+
+  final bytes = await sftp.download(
+    '/remote/file.txt',
+    output,
+    onProgress: (bytesRead) => print('downloaded: $bytesRead bytes'),
+    closeDestination: true,
+  );
+
+  print('download complete: $bytes bytes');
+}
+```
+
+`download()` and `downloadTo()` are opt-in convenience APIs built on top of the
+existing stream-based behavior, so existing code remains fully compatible.
+
+When to use each API:
+
+- Use `sftp.download(path, sink)` when you only have a remote path and want the
+  simplest one-liner flow. It opens and closes the remote file for you.
+- Use `file.downloadTo(sink)` when you already have an open `SftpFile` (for
+  example you want partial downloads with `offset`/`length` or want to reuse the
+  same handle).
+
+```dart
+void main() async {
+  final sftp = await client.sftp();
+  final file = await sftp.open('/remote/file.txt');
+  final output = File('local_partial.bin').openWrite();
+
+  try {
+    // Download bytes [1024, 1024 + 4096) using an existing open handle.
+    await file.downloadTo(
+      output,
+      offset: 1024,
+      length: 4096,
+      closeDestination: true,
+    );
+  } finally {
+    await file.close();
+  }
+}
+```
+
+For high-latency links or large files, you can tune pipelining:
+
+```dart
+void main() async {
+  final sftp = await client.sftp();
+  final output = File('local_file.txt').openWrite();
+
+  await sftp.download(
+    '/remote/file.txt',
+    output,
+    chunkSize: 64 * 1024,
+    maxPendingRequests: 128,
+    closeDestination: true,
+  );
 }
 ```
 
@@ -432,8 +629,38 @@ void main() async {
 - `diffie-hellman-group1-sha1 `
   
 **Cipher**: 
+- `aes[128|256]-gcm@openssh.com`
 - `aes[128|192|256]-ctr`
 - `aes[128|192|256]-cbc`
+
+AES-GCM is currently available as opt-in via `SSHAlgorithms(cipher: ...)`, and is not enabled in the default cipher preference list yet.
+
+Example (opt-in AES-GCM with explicit fallback ciphers):
+
+```dart
+void main() async {
+  final client = SSHClient(
+    await SSHSocket.connect('localhost', 22),
+    username: '<username>',
+    onPasswordRequest: () => '<password>',
+    algorithms: const SSHAlgorithms(
+      cipher: [
+        SSHCipherType.aes256gcm,
+        SSHCipherType.aes128gcm,
+        SSHCipherType.aes256ctr,
+        SSHCipherType.aes128ctr,
+        SSHCipherType.aes256cbc,
+        SSHCipherType.aes128cbc,
+      ],
+    ),
+  );
+
+  // Use the client...
+  client.close();
+}
+```
+
+`chacha20-poly1305@openssh.com` is not supported yet.
 
 **Integrity**: 
 - `hmac-md5`

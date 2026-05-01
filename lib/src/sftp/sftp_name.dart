@@ -15,17 +15,9 @@ class SftpName {
   });
 
   factory SftpName.readFrom(SSHMessageReader reader) {
-    final filename = reader.readUtf8();
-    final longname = reader.readUtf8();
-    final apartAttr= SftpFileAttrs.readFrom(reader);
-    
-    // Parse user and group names from longname if possible
-    final parsedNames = parseLongname(longname);
-    final attr = apartAttr.copyWith(
-      userName: parsedNames['user'],
-      groupName: parsedNames['group'],
-    );
-    
+    final filename = reader.readUtf8(allowMalformed: true);
+    final longname = reader.readUtf8(allowMalformed: true);
+    final attr = SftpFileAttrs.readFrom(reader);
     return SftpName(
       filename: filename,
       longname: longname,
