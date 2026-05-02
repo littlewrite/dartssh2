@@ -9,7 +9,7 @@ import 'package:dartssh2/src/hostkey/hostkey_ecdsa.dart';
 import 'package:dartssh2/src/hostkey/hostkey_ed25519.dart';
 import 'package:dartssh2/src/hostkey/hostkey_rsa.dart';
 import 'package:dartssh2/src/ssh_hostkey.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:dartssh2/src/utils/bigint.dart';
 import 'package:dartssh2/src/utils/bcrypt.dart';
 import 'package:dartssh2/src/utils/cipher_ext.dart';
@@ -239,8 +239,20 @@ class OpenSSHKeyPairs {
 
     final key = Uint8List.view(kdfHash.buffer, 0, cipher.keySize);
     final iv = Uint8List.view(kdfHash.buffer, cipher.keySize, cipher.ivSize);
-    final decryptCipher = cipher.createCipher(key, iv, forEncryption: false);
-    return decryptCipher.processAll(blob);
+
+    try {
+      if (cipher.isAead) {
+        final decryptCipher = cipher.createAEADCipher(key, iv,
+            forEncryption: false) as AEADCipher;
+        return decryptCipher.processAll(blob);
+      } else {
+        final decryptCipher =
+            cipher.createCipher(key, iv, forEncryption: false);
+        return decryptCipher.processAll(blob);
+      }
+    } catch (e) {
+      throw SSHKeyDecryptError('Failed to decrypt private key', e);
+    }
   }
 
   @override
@@ -280,7 +292,7 @@ class OpenSSHBcryptKdfOptions implements OpenSSHKdfOptions {
   }
 }
 
-abstract class OpenSSHKeyPair implements SSHKeyPair {
+mixin OpenSSHKeyPair implements SSHKeyPair {
   void writeTo(SSHMessageWriter writer);
 
   @override
@@ -538,6 +550,8 @@ class RsaKeyPair {
 
     try {
       return RsaPrivateKey.decode(keyBlob);
+    } on UnsupportedError {
+      rethrow;
     } catch (e) {
       throw SSHKeyDecodeError('Failed to decode private key', e);
     }
@@ -755,6 +769,8 @@ class EcKeyPair {
 
     try {
       return _decodeLegacyEcPrivateKey(keyBlob);
+    } on UnsupportedError {
+      rethrow;
     } catch (e) {
       throw SSHKeyDecodeError('Failed to decode private key', e);
     }
@@ -772,10 +788,21 @@ class EcKeyPair {
     final d = decodeBigIntWithSign(1, privateKeyOctets);
 
     Uint8List? publicPoint;
+    String? curveId;
 
     for (var i = 2; i < sequence.elements.length; i++) {
       final element = sequence.elements[i];
-      if (element.tag == 0xA1) {
+      if (element.tag == 0xA0) {
+        final inner = ASN1Parser(element.valueBytes()).nextObject();
+        if (inner is ASN1ObjectIdentifier && inner.identifier != null) {
+          final oid = inner.identifier!;
+          curveId = _curveIdFromOid(oid);
+          if (curveId == null) {
+            throw UnsupportedError(
+                'Unsupported EC PRIVATE KEY curve OID: $oid');
+          }
+        }
+      } else if (element.tag == 0xA1) {
         final inner = ASN1Parser(element.valueBytes()).nextObject();
         if (inner is ASN1BitString) {
           publicPoint = inner.contentBytes();
@@ -783,15 +810,31 @@ class EcKeyPair {
       }
     }
 
-    final curveId =
+    curveId ??=
         _inferCurveId(publicPoint?.length ?? 0, privateKeyOctets.length);
     if (curveId == null) {
       throw UnsupportedError('Unsupported EC PRIVATE KEY curve');
     }
 
+    if (publicPoint != null) {
+      final expectedPublicPoint = _derivePublicPoint(curveId, d);
+      if (publicPoint.length != expectedPublicPoint.length ||
+          !publicPoint.equals(expectedPublicPoint)) {
+        throw UnsupportedError(
+            'EC PRIVATE KEY public point does not match curve $curveId');
+      }
+    }
+
     final q = publicPoint ?? _derivePublicPoint(curveId, d);
 
     return OpenSSHEcdsaKeyPair(curveId, q, d, '');
+  }
+
+  String? _curveIdFromOid(String oid) {
+    if (oid == '1.2.840.10045.3.1.7') return 'nistp256';
+    if (oid == '1.3.132.0.34') return 'nistp384';
+    if (oid == '1.3.132.0.35') return 'nistp521';
+    return null;
   }
 
   String? _inferCurveId(int publicPointLength, int privateKeyLength) {

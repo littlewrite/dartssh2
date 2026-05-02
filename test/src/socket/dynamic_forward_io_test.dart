@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dartssh2/src/dynamic_forward.dart';
-import 'package:dartssh2/src/message/msg_channel.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:dartssh2/src/ssh_channel.dart';
 import 'package:dartssh2/src/ssh_forward.dart';
 import 'package:test/test.dart';

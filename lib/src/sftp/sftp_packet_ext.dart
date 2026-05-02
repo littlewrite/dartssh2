@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dartssh2/src/sftp/sftp_packet.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 
 /// Represents the payload of an extended request. Should be wrapped in a
 /// [SftpExtendedPacket] before being sent.
@@ -39,6 +39,28 @@ class SftpStatVfsRequest extends SftpExtendedRequest {
   @override
   void writeTo(SSHMessageWriter writer) {
     writer.writeUtf8(path);
+  }
+}
+
+/// Request for atomic rename semantics as per POSIX rename(2).
+///
+/// When supported by the server (extension name `posix-rename@openssh.com`,
+/// version `1`), this performs an atomic rename that replaces the destination
+/// if it already exists.
+class SftpPosixRenameRequest extends SftpExtendedRequest {
+  SftpPosixRenameRequest({required this.oldPath, required this.newPath});
+
+  @override
+  final String name = 'posix-rename@openssh.com';
+
+  final String oldPath;
+
+  final String newPath;
+
+  @override
+  void writeTo(SSHMessageWriter writer) {
+    writer.writeUtf8(oldPath);
+    writer.writeUtf8(newPath);
   }
 }
 

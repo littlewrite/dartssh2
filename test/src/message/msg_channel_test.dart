@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:dartssh2/src/message/msg_channel.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -197,7 +196,7 @@ void main() {
         singleConnection: true,
         x11AuthenticationProtocol: 'MIT-MAGIC-COOKIE-1',
         x11AuthenticationCookie: 'deadbeef',
-        x11ScreenNumber: '0',
+        x11ScreenNumber: 0,
       );
 
       final decoded = SSH_Message_Channel_Request.decode(message.encode());
@@ -208,7 +207,7 @@ void main() {
       expect(decoded.singleConnection, isTrue);
       expect(decoded.x11AuthenticationProtocol, 'MIT-MAGIC-COOKIE-1');
       expect(decoded.x11AuthenticationCookie, 'deadbeef');
-      expect(decoded.x11ScreenNumber, '0');
+      expect(decoded.x11ScreenNumber, 0);
     });
 
     test('auth-agent request encode/decode roundtrip', () {

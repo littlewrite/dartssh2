@@ -76,15 +76,22 @@ class SSHPem {
   }
 
   String encode([int lineLength = 64]) {
+    if (lineLength < 1) {
+      throw ArgumentError.value(
+        lineLength,
+        'lineLength',
+        'must be at least 1',
+      );
+    }
+
     final encoded = base64.encode(content);
-    final builder = StringBuffer();
-    builder.writeln('-----BEGIN $type-----');
+    final lines = <String>['-----BEGIN $type-----'];
     for (var i = 0; i < encoded.length; i += lineLength) {
       final chunk = encoded.substring(i, min(i + lineLength, encoded.length));
-      builder.writeln(chunk);
+      lines.add(chunk);
     }
-    builder.writeln('-----END $type-----');
-    return builder.toString();
+    lines.add('-----END $type-----');
+    return '${lines.join('\n')}\n';
   }
 
   @override

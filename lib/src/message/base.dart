@@ -1,16 +1,54 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:convert/convert.dart';
+import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/hostkey/hostkey_ecdsa.dart';
+import 'package:dartssh2/src/hostkey/hostkey_ed25519.dart';
+import 'package:dartssh2/src/hostkey/hostkey_rsa.dart';
+import 'package:dartssh2/src/ssh_hostkey.dart';
 import 'package:dartssh2/src/utils/int.dart';
 import 'package:dartssh2/src/utils/bigint.dart';
-import 'package:dartssh2/src/utils/utf8.dart' show utf8Encode, smartDecodeString;
+import 'package:dartssh2/src/utils/list.dart';
+import 'package:dartssh2/src/utils/utf8.dart';
+
+part 'msg_channel.dart';
+part 'msg_debug.dart';
+part 'msg_disconnect.dart';
+part 'msg_ignore.dart';
+part 'msg_kex_dh.dart';
+part 'msg_kex_ecdh.dart';
+part 'msg_kex.dart';
+part 'msg_request.dart';
+part 'msg_service.dart';
+part 'msg_userauth.dart';
 
 abstract class SSHMessage {
-  /// Encode the message to SSH encoded data.
   Uint8List encode();
 
   static int readMessageId(Uint8List bytes) {
     return bytes[0];
+  }
+
+  // RFC 4251 Section 7: Message number validation
+  static bool isValidMessageId(int messageId) {
+    return messageId >= 1 && messageId <= 255;
+  }
+
+  static bool isTransportMessage(int messageId) {
+    return (messageId >= 1 && messageId <= 19) || // Generic
+        (messageId >= 20 && messageId <= 29) || // Algorithm negotiation
+        (messageId >= 30 && messageId <= 49); // Key exchange
+  }
+
+  static bool isUserAuthMessage(int messageId) {
+    return (messageId >= 50 && messageId <= 59) || // Generic
+        (messageId >= 60 && messageId <= 79); // Method specific
+  }
+
+  static bool isConnectionMessage(int messageId) {
+    return (messageId >= 80 && messageId <= 89) || // Generic
+        (messageId >= 90 && messageId <= 127); // Channel related
   }
 }
 
@@ -72,7 +110,11 @@ class SSHMessageReader {
   }
 
   String readUtf8({bool allowMalformed = false}) {
-    return utf8.decode(readString(), allowMalformed: allowMalformed);
+    final bytes = readString();
+    if (allowMalformed) {
+      return utf8.decode(bytes, allowMalformed: true);
+    }
+    return smartDecodeString(bytes);
   }
 
   List<String> readNameList() {
@@ -110,6 +152,7 @@ class SSHMessageWriter {
   int get length => _builder.length;
 
   void writeBool(bool value) {
+    // RFC 4251: applications MUST NOT store values other than 0 and 1
     _builder.addByte(value ? 1 : 0);
   }
 
@@ -147,7 +190,27 @@ class SSHMessageWriter {
 
   /// Write comma separated list of names as a string.
   void writeNameList(List<String> value) {
+    // RFC 4251: A name MUST have a non-zero length, and it MUST NOT contain a comma
+    for (final name in value) {
+      if (name.isEmpty) {
+        throw ArgumentError('Name in name-list cannot be empty');
+      }
+      if (name.contains(',')) {
+        throw ArgumentError('Name in name-list cannot contain comma: $name');
+      }
+      // Names must be US-ASCII
+      if (!_isUsAscii(name)) {
+        throw ArgumentError('Name in name-list must be US-ASCII: $name');
+      }
+    }
     writeString(Utf8Encoder().convert(value.join(',')));
+  }
+
+  bool _isUsAscii(String str) {
+    for (int i = 0; i < str.length; i++) {
+      if (str.codeUnitAt(i) > 127) return false;
+    }
+    return true;
   }
 
   /// Write multiple precision integer as a string.

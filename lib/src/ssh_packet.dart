@@ -1,6 +1,10 @@
 import 'dart:typed_data';
 
-/// Contains rfc4253 packet format related constants and helper functions.
+import 'package:dartssh2/src/ssh_errors.dart' show SSHStateError;
+
+/// SSH packet sequence number wraps around to zero after every 2^32
+/// packets. According to RFC4253, this counter should never be reset,
+/// even during key re-exchanges.
 abstract class SSHPacket {
   /// The maximum size of a packet including the header and MAC.
   static const maxLength = 35000;
@@ -17,13 +21,13 @@ abstract class SSHPacket {
   static const headerLength = 5;
 
   /// Returns the length field of the packet. This is the number of bytes
-  /// following the length field except for the MAC. [packet] can be partitial.
+  /// following the length field except for the MAC. [packet] can be partial.
   static int readPacketLength(Uint8List packet) {
     return ByteData.sublistView(packet).getUint32(0);
   }
 
   /// Returns the length of padding at the end of the packet before the MAC.
-  /// [packet] can be partitial.
+  /// [packet] can be partial.
   static int readPaddingLength(Uint8List packet) {
     return ByteData.sublistView(packet).getUint8(4);
   }
@@ -62,9 +66,14 @@ class SSHPacketSN {
 
   int get value => _value;
 
+  // RFC 4251 Section 9.3.3: peers MUST rekey before sequence number wrap
+  bool get needsRekey => _value > 0xF0000000; // Trigger rekey before wrap
+
   void increase() {
     if (_value == 0xffffffff) {
-      _value = 0;
+      // RFC 4251: This should never happen - must rekey before wrap
+      throw SSHStateError(
+          'Sequence number wrapped - connection must be rekeyed');
     } else {
       _value++;
     }

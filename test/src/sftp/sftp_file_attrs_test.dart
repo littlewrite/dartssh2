@@ -1,5 +1,5 @@
 import 'package:dartssh2/src/sftp/sftp_file_attrs.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:test/test.dart';
 
 void main() {

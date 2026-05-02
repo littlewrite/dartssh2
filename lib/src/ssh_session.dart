@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:dartssh2/src/message/base.dart';
 import 'package:dartssh2/src/ssh_channel.dart';
 import 'package:dartssh2/src/ssh_signal.dart';
-import 'package:dartssh2/src/message/msg_channel.dart';
 
 /// A [SSHSession] represents a remote execution of a program.
 class SSHSession {
@@ -101,6 +101,39 @@ class SSHSession {
   /// Close the session. After this call, the session is no longer usable.
   void close() {
     _channel.close();
+  }
+
+  /// Wait for the remote process to exit. Returns the exit code of the remote
+  /// process, or null if the process has not yet exited.
+  Future<int?> waitForExit({Duration? timeout}) async {
+    final completer = Completer<int?>();
+
+    void checkExit() {
+      if (_exitCode != null && !completer.isCompleted) {
+        completer.complete(_exitCode);
+      }
+    }
+
+    // Check the exit code immediately
+    checkExit();
+
+    final subscription = done.asStream().listen((_) => checkExit());
+    Timer? timeoutTimer;
+    if (timeout != null) {
+      timeoutTimer = Timer(timeout, () {
+        subscription.cancel();
+        if (!completer.isCompleted) {
+          completer.complete(null);
+        }
+      });
+    }
+
+    completer.future.then((_) {
+      timeoutTimer?.cancel();
+      subscription.cancel();
+    });
+
+    return completer.future;
   }
 
   /// Deliver [signal] to the remote process. Some implementations may not

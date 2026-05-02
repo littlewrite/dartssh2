@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:dartssh2/src/message/msg_channel.dart';
 import 'package:dartssh2/src/sftp/sftp_client.dart';
 import 'package:dartssh2/src/sftp/sftp_errors.dart';
 import 'package:dartssh2/src/sftp/sftp_file_attrs.dart';
 import 'package:dartssh2/src/sftp/sftp_packet.dart';
 import 'package:dartssh2/src/sftp/sftp_status_code.dart';
 import 'package:dartssh2/src/ssh_channel.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:test/test.dart';
 
 void main() {

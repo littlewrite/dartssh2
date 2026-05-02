@@ -15,7 +15,7 @@ import 'package:dartssh2/src/sftp/sftp_stream_io.dart';
 import 'package:dartssh2/src/ssh_channel.dart';
 import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/utils/chunk_buffer.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 
 const _kVersion = 3;
 const _kReadChunkSize = 16 * 1024;
@@ -162,7 +162,29 @@ class SftpClient {
   }
 
   /// Renames a file or directory from [oldPath] to [newPath].
+  ///
+  /// If the server supports the `posix-rename@openssh.com` SFTP extension
+  /// (version "1"), this method uses it to perform an atomic rename with
+  /// POSIX semantics (replace destination if it exists). Otherwise, it falls
+  /// back to the standard SFTP `SSH_FXP_RENAME` request.
   Future<void> rename(String oldPath, String newPath) async {
+    // Prefer OpenSSH's posix-rename extension when available.
+    final hs = await handshake;
+    final extVersion = hs.extensions['posix-rename@openssh.com'];
+    if (extVersion != null) {
+      try {
+        await _checkExtension('posix-rename@openssh.com', '1');
+        final payload =
+            SftpPosixRenameRequest(oldPath: oldPath, newPath: newPath);
+        final reply = await _sendExtended(payload);
+        if (reply is! SftpStatusPacket) throw SftpError('Unexpected reply');
+        SftpStatusError.check(reply);
+        return;
+      } on SftpExtensionError {
+        // Fall through to standard rename if extension unsupported/mismatched.
+      }
+    }
+
     final reply = await _sendRename(oldPath, newPath);
     if (reply is! SftpStatusPacket) throw SftpError('Unexpected reply');
     SftpStatusError.check(reply);
@@ -614,21 +636,24 @@ class SftpFile {
     }
 
     final endOffset = offset + length;
-    final pendingReads = <Future<Uint8List?>>[];
-    var nextOffset = offset;
+    final pendingReads = <MapEntry<int, Future<Uint8List?>>>[];
+    var reservedOffset = offset;
     var bytesRead = 0;
 
     while (bytesRead < length) {
-      while (
-          nextOffset < endOffset && pendingReads.length < maxPendingRequests) {
-        final requestLength = min(chunkSize, endOffset - nextOffset);
-        pendingReads.add(_readChunk(requestLength, nextOffset));
-        nextOffset += requestLength;
+      while (reservedOffset < endOffset &&
+          pendingReads.length < maxPendingRequests) {
+        final requestLength = min(chunkSize, endOffset - reservedOffset);
+        pendingReads.add(
+          MapEntry(reservedOffset, _readChunk(requestLength, reservedOffset)),
+        );
+        reservedOffset += requestLength;
       }
 
       if (pendingReads.isEmpty) break;
 
-      final chunk = await pendingReads.removeAt(0);
+      final pendingRead = pendingReads.removeAt(0);
+      final chunk = await pendingRead.value;
       if (chunk == null) break;
       if (chunk.isEmpty) {
         throw SftpError('Unexpected empty data chunk before EOF');
@@ -702,13 +727,28 @@ class SftpFile {
     Stream<Uint8List> stream, {
     int offset = 0,
     void Function(int total)? onProgress,
+    int chunkSize = defaultChunkSize,
+    int maxBytesOnTheWire = defaultMaxBytesOnTheWire,
   }) {
-    return SftpFileWriter(this, stream, offset, onProgress);
+    return SftpFileWriter(
+      this,
+      stream,
+      offset,
+      onProgress,
+      chunkSize: chunkSize,
+      maxBytesOnTheWire: maxBytesOnTheWire,
+    );
   }
 
   /// Writes [data] to the file starting at [offset].
-  Future<void> writeBytes(Uint8List data, {int offset = 0}) async {
-    const maxChunkSize = 16 * 1024;
+  Future<void> writeBytes(
+    Uint8List data, {
+    int offset = 0,
+    int? chunkSize,
+    int? maxPendingWrites,
+  }) async {
+    final int maxChunkSize = chunkSize ?? 16 * 1024;
+    final int? concurrency = maxPendingWrites;
     var bytesSent = 0;
     final futures = <Future<void>>[];
     while (bytesSent < data.length) {
@@ -717,6 +757,11 @@ class SftpFile {
       final chunkEnd = chunkBegin + chunkSize;
       final chunk = Uint8List.sublistView(data, chunkBegin, chunkEnd);
       futures.add(_writeChunk(chunk, offset: offset + bytesSent));
+      if (concurrency != null && futures.length >= concurrency) {
+        // Wait for one pending write to complete to cap concurrency.
+        await futures.first;
+        futures.removeAt(0);
+      }
       bytesSent += chunkSize;
     }
     await Future.wait(futures);

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
-import 'package:dartssh2/src/message/msg_userauth.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -14,7 +14,11 @@ void main() {
         keepAliveInterval: null,
       );
 
-      // Simulate server auth success so forwardDynamic can proceed.
+      // This is an intentional unit-test shortcut that bypasses the full SSH
+      // handshake. It simulates receiving SSH_Message_Userauth_Success and
+      // injects it via client.handlePacket() to drive forwardDynamic's behavior
+      // of waiting for authentication. This test only verifies that
+      // forwardDynamic properly waits for auth to complete before proceeding.
       scheduleMicrotask(() {
         client.handlePacket(SSH_Message_Userauth_Success().encode());
       });

@@ -13,6 +13,7 @@ class SSHCipherType extends SSHAlgorithm {
     aes128ctr,
     aes192ctr,
     aes256ctr,
+    chacha20poly1305,
   ];
 
   static const aes128ctr = SSHCipherType._(
@@ -40,6 +41,7 @@ class SSHCipherType extends SSHAlgorithm {
     ivSize: 12,
     blockSize: 16,
     aeadTagSize: 16,
+    cipherFactory: _aesGcmFactory,
   );
 
   static const aes256gcm = SSHCipherType._(
@@ -49,6 +51,7 @@ class SSHCipherType extends SSHAlgorithm {
     ivSize: 12,
     blockSize: 16,
     aeadTagSize: 16,
+    cipherFactory: _aesGcmFactory,
   );
 
   static const aes128cbc = SSHCipherType._(
@@ -67,6 +70,16 @@ class SSHCipherType extends SSHAlgorithm {
     name: 'aes256-cbc',
     keySize: 32,
     cipherFactory: _aesCbcFactory,
+  );
+
+  static const chacha20poly1305 = SSHCipherType._(
+    name: 'chacha20-poly1305@openssh.com',
+    keySize: 32,
+    isAead: true,
+    ivSize: 12,
+    blockSize: 16,
+    aeadTagSize: 16,
+    cipherFactory: _chacha20Poly1305Factory,
   );
 
   static SSHCipherType? fromName(String name) {
@@ -88,23 +101,20 @@ class SSHCipherType extends SSHAlgorithm {
     this.blockSize = 16,
   });
 
-  /// The name of the algorithm. For example, `"aes256-ctr`"`.
   @override
   final String name;
 
   final int keySize;
 
-  /// Indicates whether this cipher is an AEAD mode (e.g. AES-GCM).
   final bool isAead;
 
-  /// Authentication tag size for AEAD ciphers.
   final int aeadTagSize;
 
   final int ivSize;
 
   final int blockSize;
 
-  final BlockCipher Function()? cipherFactory;
+  final dynamic Function()? cipherFactory;
 
   BlockCipher createCipher(
     Uint8List key,
@@ -117,6 +127,11 @@ class SSHCipherType extends SSHAlgorithm {
       );
     }
 
+    final factory = cipherFactory;
+    if (factory == null) {
+      throw StateError('No block cipher factory configured for $name');
+    }
+
     if (key.length != keySize) {
       throw ArgumentError.value(key, 'key', 'Key must be $keySize bytes long');
     }
@@ -125,12 +140,46 @@ class SSHCipherType extends SSHAlgorithm {
       throw ArgumentError.value(iv, 'iv', 'IV must be $ivSize bytes long');
     }
 
-    final factory = cipherFactory;
-    if (factory == null) {
-      throw StateError('No block cipher factory configured for $name');
-    }
     final cipher = factory();
     cipher.init(forEncryption, ParametersWithIV(KeyParameter(key), iv));
+    return cipher;
+  }
+
+  dynamic createAEADCipher(
+    Uint8List key,
+    Uint8List nonce, {
+    required bool forEncryption,
+    Uint8List? aad,
+  }) {
+    if (!isAead) {
+      throw StateError('Use createCipher for non-AEAD modes');
+    }
+
+    if (key.length != keySize) {
+      throw ArgumentError.value(key, 'key', 'Key must be $keySize bytes long');
+    }
+
+    if (nonce.length != ivSize) {
+      throw ArgumentError.value(
+        nonce,
+        'nonce',
+        'Nonce must be $ivSize bytes long',
+      );
+    }
+
+    final factory = cipherFactory;
+    if (factory == null) {
+      throw StateError('No AEAD cipher factory configured for $name');
+    }
+
+    final cipher = factory();
+    final params = AEADParameters(
+      KeyParameter(key),
+      aeadTagSize * 8,
+      nonce,
+      aad ?? Uint8List(0),
+    );
+    cipher.init(forEncryption, params);
     return cipher;
   }
 }
@@ -142,4 +191,12 @@ BlockCipher _aesCtrFactory() {
 
 BlockCipher _aesCbcFactory() {
   return CBCBlockCipher(AESEngine());
+}
+
+dynamic _aesGcmFactory() {
+  return GCMBlockCipher(AESEngine());
+}
+
+dynamic _chacha20Poly1305Factory() {
+  return ChaCha20Poly1305(ChaCha7539Engine(), Poly1305());
 }

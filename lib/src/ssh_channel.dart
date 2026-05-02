@@ -6,8 +6,7 @@ import 'dart:typed_data';
 import 'package:dartssh2/src/ssh_channel_id.dart';
 import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/utils/async_queue.dart';
-import 'package:dartssh2/src/message/msg_channel.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:dartssh2/src/utils/stream.dart';
 
 /// Handler of channel requests. Return true if the request was handled, false
@@ -17,6 +16,9 @@ typedef SSHChannelRequestHandler = bool Function(
 );
 
 class SSHChannelController {
+  static const _initialWindowSize = 2 * 1024 * 1024;
+  static const _windowAdjustThreshold = _initialWindowSize / 2;
+
   final int localId;
   final int localMaximumPacketSize;
   final int localInitialWindowSize;
@@ -60,13 +62,18 @@ class SSHChannelController {
   /// A [StreamController] that accepts data from local end of the channel.
   final _localStream = StreamController<SSHChannelData>();
 
-  late final _locaStreamConsumer = SSHChannelDataConsumer(_localStream.stream);
+  late final _localStreamConsumer = SSHChannelDataConsumer(_localStream.stream);
 
   /// Handler of channel requests from the remote side.
   late var _requestHandler = _defaultRequestHandler;
 
   /// An [AsyncQueue] of pending request replies from the remote side.
   final _requestReplyQueue = AsyncQueue<bool>();
+
+  /// Fails all pending request reply waiters.
+  void failPendingRequestReplies(Object error, [StackTrace? stackTrace]) {
+    _requestReplyQueue.failAll(error, stackTrace ?? StackTrace.current);
+  }
 
   /// true if we have sent an EOF message to the remote side.
   var _hasSentEOF = false;
@@ -133,7 +140,7 @@ class SSHChannelController {
         singleConnection: singleConnection,
         x11AuthenticationProtocol: authenticationProtocol,
         x11AuthenticationCookie: authenticationCookie,
-        x11ScreenNumber: screenNumber.toString(),
+        x11ScreenNumber: screenNumber,
       ),
     );
     return await _requestReplyQueue.next;
@@ -226,7 +233,7 @@ class SSHChannelController {
   Future<void> close() async {
     if (_done.isCompleted) return;
 
-    _locaStreamConsumer.cancel();
+    _localStreamConsumer.cancel();
     _sendEOFIfNeeded();
 
     if (_remoteStream.isClosed) {
@@ -244,7 +251,7 @@ class SSHChannelController {
   void destroy() {
     if (_done.isCompleted) return;
     _remoteStream.close();
-    _locaStreamConsumer.cancel();
+    _localStreamConsumer.cancel();
     _sendEOFIfNeeded();
     _sendCloseIfNeeded();
     _done.complete();
@@ -257,7 +264,8 @@ class SSHChannelController {
       throw ArgumentError.value(bytesToAdd, 'bytesToAdd', 'must be positive');
     }
 
-    _remoteWindow += bytesToAdd;
+    final next = _remoteWindow + bytesToAdd;
+    _remoteWindow = next & 0xFFFFFFFF; // 2³²-1 Overflow
 
     if (_remoteWindow > 0) {
       _uploadLoop.activate();
@@ -276,7 +284,13 @@ class SSHChannelController {
 
     _localWindow -= data.length;
     if (_localWindow < 0) {
-      // Maybe we should close the channel here?
+      // Log and recover by issuing a window adjust; negative indicates protocol
+      // mismatch or delay in flow control from the remote. We prefer recovery
+      // to hard-closing for better interoperability.
+      printDebug?.call(
+        'SSHChannel._handleDataMessage: local window underflow '
+        '(localWindow=$_localWindow); recovering with WINDOW_ADJUST',
+      );
     }
 
     _sendWindowAdjustIfNeeded();
@@ -351,17 +365,46 @@ class SSHChannelController {
 
     if (_done.isCompleted) return;
     if (_remoteStream.isPaused) return;
-    if (_localWindow <= 0) return;
 
-    final bytesToAdd = localInitialWindowSize - _localWindow;
-    _localWindow = localInitialWindowSize;
+    // Only send a window adjust message if the window is below the threshold.
+    // Assumes _windowAdjustThreshold is non-negative.
+    // If _localWindow is negative (an invalid state), it will likely be <= _windowAdjustThreshold.
+    if (_localWindow > _windowAdjustThreshold) return;
 
-    sendMessage(
-      SSH_Message_Channel_Window_Adjust(
-        recipientChannel: remoteId,
-        bytesToAdd: bytesToAdd,
-      ),
-    );
+    const maxRfcWindowSize = 0xFFFFFFFF; // 2^32 - 1
+
+    // Determine the target window size, respecting RFC limits.
+    // localInitialWindowSize is typically a positive value (e.g., 2MB).
+    final int targetWindow = (localInitialWindowSize > maxRfcWindowSize ||
+            localInitialWindowSize < 0)
+        ? maxRfcWindowSize
+        : localInitialWindowSize;
+
+    // If the current local window is already at or above the target,
+    // no further increase is needed.
+    if (_localWindow >= targetWindow) {
+      // As a defensive measure, if _localWindow somehow exceeded the absolute max,
+      // cap it. This is more about correcting an invalid state than calculating
+      // bytesToAdd for this specific adjustment.
+      if (_localWindow > maxRfcWindowSize) {
+        _localWindow = maxRfcWindowSize;
+      }
+      return;
+    }
+
+    // At this point, _localWindow < targetWindow.
+    // Calculate the number of bytes to add to reach the targetWindow.
+    // This will be a positive value. If _localWindow was negative (erroneous state),
+    // bytesToAdd will be appropriately larger to compensate.
+    final int bytesToAdd = targetWindow - _localWindow;
+
+    // Update our local window state to reflect the window size we are now advertising.
+    _localWindow = targetWindow;
+
+    sendMessage(SSH_Message_Channel_Window_Adjust(
+      recipientChannel: remoteId,
+      bytesToAdd: bytesToAdd,
+    ));
   }
 
   late final _uploadLoop = OnceSimultaneously(() async {
@@ -371,7 +414,7 @@ class SSHChannelController {
       }
 
       final dataToRead = min(_remoteWindow, remoteMaximumPacketSize);
-      final data = await _locaStreamConsumer.read(dataToRead);
+      final data = await _localStreamConsumer.read(dataToRead);
 
       if (data == null) {
         _sendEOFIfNeeded();
@@ -480,7 +523,10 @@ class SSHChannel {
 
   /// Closes our side of the channel. Returns a [Future] that completes when
   /// both sides of the channel are closed.
-  Future<void> close() => _controller.close();
+  Future<void> close() {
+    _controller._sendEOFIfNeeded();
+    return _controller.close();
+  }
 
   /// Destroys the channel in both directions. After calling this method,
   /// no more data can be sent or received.

@@ -3,9 +3,8 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:dartssh2/src/hostkey/hostkey_rsa.dart';
-import 'package:dartssh2/src/message/msg_channel.dart';
 import 'package:dartssh2/src/ssh_channel.dart';
-import 'package:dartssh2/src/ssh_message.dart';
+import 'package:dartssh2/src/message/base.dart';
 import 'package:test/test.dart';
 
 import '../test_utils.dart';
