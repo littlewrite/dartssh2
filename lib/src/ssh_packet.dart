@@ -66,6 +66,10 @@ class SSHPacketSN {
 
   int get value => _value;
 
+  void debugSetValue(int value) {
+    _value = value;
+  }
+
   // RFC 4251 Section 9.3.3: peers MUST rekey before sequence number wrap
   bool get needsRekey => _value > 0xF0000000; // Trigger rekey before wrap
 

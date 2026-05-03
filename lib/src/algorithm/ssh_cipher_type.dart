@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dartssh2/src/ssh_algorithm.dart';
+import 'package:meta/meta.dart';
 import 'package:pointycastle/export.dart';
 
 class SSHCipherType extends SSHAlgorithm {
@@ -77,7 +78,7 @@ class SSHCipherType extends SSHAlgorithm {
     keySize: 32,
     isAead: true,
     ivSize: 12,
-    blockSize: 16,
+    blockSize: 8,
     aeadTagSize: 16,
     cipherFactory: _chacha20Poly1305Factory,
   );
@@ -100,6 +101,27 @@ class SSHCipherType extends SSHAlgorithm {
     this.ivSize = 16,
     this.blockSize = 16,
   });
+
+  @visibleForTesting
+  factory SSHCipherType.testInstance({
+    required String name,
+    required int keySize,
+    dynamic Function()? cipherFactory,
+    bool isAead = false,
+    int aeadTagSize = 0,
+    int ivSize = 16,
+    int blockSize = 16,
+  }) {
+    return SSHCipherType._(
+      name: name,
+      keySize: keySize,
+      cipherFactory: cipherFactory,
+      isAead: isAead,
+      aeadTagSize: aeadTagSize,
+      ivSize: ivSize,
+      blockSize: blockSize,
+    );
+  }
 
   @override
   final String name;

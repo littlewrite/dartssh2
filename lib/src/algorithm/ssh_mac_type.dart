@@ -6,6 +6,18 @@ import 'package:pointycastle/export.dart';
 import '../utils/truncated_hmac.dart';
 
 class SSHMacType extends SSHAlgorithm {
+  static const aeadAes128Gcm = SSHMacType._(
+    name: 'AEAD_AES_128_GCM',
+    keySize: 0,
+    macFactory: _dummyMacFactory,
+  );
+
+  static const aeadAes256Gcm = SSHMacType._(
+    name: 'AEAD_AES_256_GCM',
+    keySize: 0,
+    macFactory: _dummyMacFactory,
+  );
+
   static const hmacMd5 = SSHMacType._(
     name: 'hmac-md5',
     keySize: 16,
@@ -108,4 +120,8 @@ Mac _hmacSha256_96Factory() {
 
 Mac _hmacSha512_96Factory() {
   return TruncatedHMac(SHA512Digest(), 128, 12);
+}
+
+Mac _dummyMacFactory() {
+  return HMac(SHA256Digest(), 64);
 }

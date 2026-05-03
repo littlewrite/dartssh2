@@ -152,8 +152,9 @@ class SSHClient {
   /// Function called when the first host key is received. Return true to accept
   /// the host key, false to reject it and close the connection.
   ///
-  /// Security note: This is required for safety. If not provided, the
-  /// connection will be rejected by default at host key verification time.
+  /// Security note: callers should provide this in production so host keys are
+  /// explicitly verified. If null, the host key is accepted for backward
+  /// compatibility.
   final SSHHostkeyVerifyHandler? onVerifyHostKey;
 
   /// List of key pairs to use for authentication. Set this field to enable

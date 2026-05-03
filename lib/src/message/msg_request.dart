@@ -144,9 +144,6 @@ class SSH_Message_Global_Request extends SSHMessage {
           type == SSHHostkeyType.ecdsa384.name ||
           type == SSHHostkeyType.ecdsa521.name) {
         result.add(SSHEcdsaPublicKey.decode(blob));
-      } else {
-        // Optionally handle unsupported types, e.g., log a warning or throw an error
-        print('Unsupported host key type in _parseHostKeys: $type');
       }
     }
     return result;

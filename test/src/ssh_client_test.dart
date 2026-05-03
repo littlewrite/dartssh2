@@ -16,6 +16,19 @@ void main() {
       client.close();
     });
 
+    test('can connect without explicit host key verifier', () async {
+      final client = SSHClient(
+        await SSHSocket.connect(testSshHost, testSshPort),
+        username: 'demo',
+        onPasswordRequest: () => 'password',
+      );
+      try {
+        await client.authenticated;
+      } finally {
+        client.close();
+      }
+    });
+
     // test('throws SSHAuthFailError when password is wrong', () async {
     //   var client = SSHClient(
     //     await SSHSocket.connect('test.rebex.net', 22),

@@ -5,15 +5,14 @@ import 'package:test/test.dart';
 
 void main() {
   group('splitOpenSSHChaChaKeys', () {
-    test('splits length and payload keys in OpenSSH order', () {
+    test('splits payload and length keys in OpenSSH order', () {
       final material = Uint8List.fromList(List<int>.generate(64, (i) => i));
 
       final keys = splitOpenSSHChaChaKeys(material);
 
-      expect(
-          keys.lenKey,
-          equals(Uint8List.fromList(List<int>.generate(32, (i) => i))));
       expect(keys.encKey,
+          equals(Uint8List.fromList(List<int>.generate(32, (i) => i))));
+      expect(keys.lenKey,
           equals(Uint8List.fromList(List<int>.generate(32, (i) => i + 32))));
     });
 

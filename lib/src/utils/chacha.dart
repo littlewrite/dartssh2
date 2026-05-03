@@ -12,9 +12,10 @@ class OpenSSHChaChaKeys {
 
 /// Splits OpenSSH ChaCha20-Poly1305 key material into length and payload keys.
 ///
-/// OpenSSH derives 64 bytes per direction. The first 32 bytes rekey the packet
-/// length stream cipher, while the remaining 32 bytes encrypt payloads and
-/// derive Poly1305 one-time keys.
+/// OpenSSH derives 64 bytes per direction. Per the OpenSSH transport spec,
+/// the first 32 bytes become K2 for payload encryption and Poly1305 key
+/// derivation, while the remaining 32 bytes become K1 for encrypting the
+/// packet length field.
 OpenSSHChaChaKeys splitOpenSSHChaChaKeys(
   Uint8List keyMaterial,
 ) {
@@ -27,7 +28,7 @@ OpenSSHChaChaKeys splitOpenSSHChaChaKeys(
   }
 
   return OpenSSHChaChaKeys(
-    lenKey: Uint8List.sublistView(keyMaterial, 0, 32),
-    encKey: Uint8List.sublistView(keyMaterial, 32, 64),
+    encKey: Uint8List.sublistView(keyMaterial, 0, 32),
+    lenKey: Uint8List.sublistView(keyMaterial, 32, 64),
   );
 }
