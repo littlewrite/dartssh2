@@ -8,7 +8,6 @@ import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/utils/async_queue.dart';
 import 'package:dartssh2/src/message/base.dart';
 import 'package:dartssh2/src/utils/stream.dart';
-import 'package:meta/meta.dart';
 
 /// Handler of channel requests. Return true if the request was handled, false
 /// if the request was not recognized or could not be handled.
@@ -70,12 +69,6 @@ class SSHChannelController {
 
   /// An [AsyncQueue] of pending request replies from the remote side.
   final _requestReplyQueue = AsyncQueue<bool>();
-
-  @visibleForTesting
-  int get debugLocalWindow => _localWindow;
-
-  @visibleForTesting
-  int get debugRemoteWindow => _remoteWindow;
 
   /// Fails all pending request reply waiters.
   void failPendingRequestReplies(Object error, [StackTrace? stackTrace]) {
@@ -271,9 +264,8 @@ class SSHChannelController {
       throw ArgumentError.value(bytesToAdd, 'bytesToAdd', 'must be positive');
     }
 
-    const maxWindowSize = 0xFFFFFFFF;
     final next = _remoteWindow + bytesToAdd;
-    _remoteWindow = next > maxWindowSize ? maxWindowSize : next;
+    _remoteWindow = next & 0xFFFFFFFF; // 2³²-1 Overflow
 
     if (_remoteWindow > 0) {
       _uploadLoop.activate();
@@ -329,12 +321,8 @@ class SSHChannelController {
 
   void _handleCloseMessage() {
     printDebug?.call('SSHChannel._handleCLoseMessage');
-    if (_done.isCompleted) return;
-
     _remoteStream.close();
-    _localStreamConsumer.cancel();
-    _sendCloseIfNeeded();
-    _done.complete();
+    close();
   }
 
   bool _defaultRequestHandler(SSH_Message_Channel_Request request) {
@@ -466,7 +454,7 @@ class SSHChannel {
   SSHChannelId get channelId => _controller.localId;
 
   /// The channel id on the remote side.
-  SSHChannelId get remoteChannelId => _controller.localId;
+  SSHChannelId get remoteChannelId => _controller.remoteId;
 
   /// The maximum packet size that the remote side can receive.
   int get maximumPacketSize => _controller.remoteMaximumPacketSize;
@@ -565,7 +553,11 @@ class SSHChannelExtendedDataType {
 
 class SSHChannelDataSplitter
     extends StreamTransformerBase<SSHChannelData, SSHChannelData> {
-  SSHChannelDataSplitter(this.maxSize);
+  SSHChannelDataSplitter(this.maxSize) {
+    if (maxSize <= 0) {
+      throw ArgumentError.value(maxSize, 'maxSize', 'must be positive');
+    }
+  }
 
   final int maxSize;
 

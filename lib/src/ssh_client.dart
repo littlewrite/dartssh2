@@ -641,7 +641,13 @@ class SSHClient {
     await _authenticated.future;
 
     final channelController = await _openSessionChannel();
-    channelController.sendSubsystem('sftp');
+    final success = await channelController.sendSubsystem('sftp');
+    if (!success) {
+      channelController.close();
+      _channels.remove(channelController.localId);
+      _channelIdAllocator.release(channelController.localId);
+      throw SSHChannelRequestError('sftp subsystem request failed');
+    }
 
     return SftpClient(
       channelController.channel,
@@ -1596,9 +1602,10 @@ class SSHClient {
       initialWindowSize: _initialWindowSize,
       maximumPacketSize: _maximumPacketSize,
     );
+    final open = _waitChannelOpen(localChannelId);
     _sendMessage(request);
 
-    return await _waitChannelOpen(localChannelId);
+    return await open;
   }
 
   Future<SSHChannelController> _openForwardLocalChannel(
@@ -1618,9 +1625,10 @@ class SSHClient {
       originatorIP: bindAddress,
       originatorPort: bindPort,
     );
+    final open = _waitChannelOpen(localChannelId);
     _sendMessage(request);
 
-    return await _waitChannelOpen(localChannelId);
+    return await open;
   }
 
   Future<SSHChannelController> _openForwardLocalUnixChannel(
@@ -1634,9 +1642,10 @@ class SSHClient {
       maximumPacketSize: _maximumPacketSize,
       socketPath: socketPath,
     );
+    final open = _waitChannelOpen(localChannelId);
     _sendMessage(request);
 
-    return await _waitChannelOpen(localChannelId);
+    return await open;
   }
 
   Future<SSHChannelController> _waitChannelOpen(
