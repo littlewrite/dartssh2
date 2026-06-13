@@ -15,7 +15,7 @@ Future<void> main() async {
     socket,
     username: username,
     onPasswordRequest: () => password,
-    onVerifyHostKey: (host, verifier) {
+    onVerifyHostKey: (details) {
       print('WARNING: Host key verification disabled for testing.');
       return true;
     },

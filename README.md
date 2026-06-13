@@ -117,6 +117,31 @@ void main() async {
 }
 ```
 
+### Verify host keys
+
+Production clients should provide `onVerifyHostKey` and decide whether to trust
+the server based on the structured `SSHHostKeyVerificationDetails`.
+
+```dart
+void main() async {
+  final client = SSHClient(
+    await SSHSocket.connect('localhost', 22),
+    username: '<username>',
+    onPasswordRequest: () => '<password>',
+    onVerifyHostKey: (details) {
+      print('Host key type: ${details.type}');
+      print('SHA256:${details.fingerprintSha256Base64}');
+      print('MD5:${details.fingerprintMd5Hex}');
+
+      return details.fingerprintSha256Base64 == '<expected-sha256>';
+    },
+  );
+}
+```
+
+See `example/host_key_verification.dart` for a runnable example and
+`docs/host_key_verification_api.md` for migration notes and field details.
+
 > Note: `SSHSocket.connect()` uses native TCP sockets (`dart:io`) and is not
 > available on Flutter Web / Dart Web. See [Web support](#web-support) below
 > for browser-compatible transport options.

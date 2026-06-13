@@ -7,7 +7,7 @@ import 'package:dartssh2/src/message/base.dart';
 const testSshHost = 'test.rebex.net';
 const testSshPort = 22;
 
-Future<bool> acceptTestHostKey(String type, Uint8List fingerprint) async {
+Future<bool> acceptTestHostKey(SSHHostKeyVerificationDetails details) async {
   return true;
 }
 

@@ -22,9 +22,9 @@ class VerifyConfig {
   /// Option 2: private key auth
   static const privateKeyPath = '';
 
-  /// Optional strict pinning of the server host key MD5 fingerprint.
-  /// Example: 'aa:bb:cc:dd:...'
-  static const expectedHostKeyMd5 = '';
+  /// Optional strict pinning of the server host key SHA256 fingerprint.
+  /// Example: 'AbCdEf123...'
+  static const expectedHostKeySha256 = '';
 
   /// Probes
   static const runExplicitHostKeyProbe = true;
@@ -417,18 +417,19 @@ Future<String?> _passwordHandler() async {
   }
 }
 
-Future<bool> _verifyHostKey(String type, Uint8List fingerprint) async {
-  final actualMd5 = _fingerprintHex(fingerprint);
-  _log('[hostkey] type=$type md5=$actualMd5');
+Future<bool> _verifyHostKey(SSHHostKeyVerificationDetails details) async {
+  _log(
+    '[hostkey] type=${details.type} md5=${details.fingerprintMd5Hex} sha256=${details.fingerprintSha256Base64}',
+  );
 
-  final expectedMd5 = VerifyConfig.expectedHostKeyMd5.trim().toLowerCase();
-  if (expectedMd5.isEmpty) {
-    _log('[hostkey] no pinned MD5 configured, accepting');
+  final expectedSha256 = VerifyConfig.expectedHostKeySha256.trim();
+  if (expectedSha256.isEmpty) {
+    _log('[hostkey] no pinned SHA256 configured, accepting');
     return true;
   }
 
-  final accepted = actualMd5.toLowerCase() == expectedMd5;
-  _log('[hostkey] pinned-md5=$expectedMd5 match=$accepted');
+  final accepted = details.fingerprintSha256Base64 == expectedSha256;
+  _log('[hostkey] pinned-sha256=$expectedSha256 match=$accepted');
   return accepted;
 }
 
@@ -454,10 +455,6 @@ String _previewUtf8(Uint8List bytes, {int limit = 160}) {
     return text;
   }
   return '${text.substring(0, limit)}...';
-}
-
-String _fingerprintHex(Uint8List bytes) {
-  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
 }
 
 void _validateConfig() {

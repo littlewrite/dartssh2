@@ -27,15 +27,6 @@ import '../dartssh2.dart';
 
 typedef SSHPrintHandler = void Function(String?);
 
-/// Function called when host key is received.
-/// [type] is the type of the host key, for example 'ssh-rsa'.
-/// [fingerprint] is the MD5 fingerprint of the host key. The SHA256
-/// fingerprint is also logged via [printDebug] for user visibility.
-typedef SSHHostkeyVerifyHandler = FutureOr<bool> Function(
-  String type,
-  Uint8List fingerprint,
-);
-
 typedef SSHTransportReadyHandler = void Function();
 
 typedef SSHPacketHandler = void Function(Uint8List payload);
@@ -64,8 +55,9 @@ class SSHTransport {
   /// Function called when the hostkey has been received. Returns true if the
   /// hostkey is valid, false to reject key and disconnect.
   ///
-  /// Security note: clients should provide this so host keys are explicitly
-  /// verified. If null, the host key is accepted for backward compatibility.
+  /// Security note: clients must provide this handler to verify the host key.
+  /// If null, the connection is rejected for security. To use explicit
+  /// verification details, implement this callback.
   final SSHHostkeyVerifyHandler? onVerifyHostKey;
 
   /// Function called when the transport is ready to send data.
@@ -605,7 +597,8 @@ class SSHTransport {
 
   void _incrementAeadNonce(Uint8List nonce) {
     if (nonce.length != 12) {
-      throw ArgumentError.value(nonce, 'nonce', 'AEAD nonce must be 12 bytes long');
+      throw ArgumentError.value(
+          nonce, 'nonce', 'AEAD nonce must be 12 bytes long');
     }
 
     for (var index = nonce.length - 1; index >= 4; index--) {
@@ -1850,29 +1843,24 @@ class SSHTransport {
       return;
     }
 
-    // Compute MD5 and SHA256 fingerprints of the received host key.
-    final fingerprint = MD5Digest().process(hostkey);
-    final fingerprintSha256 = SHA256Digest().process(hostkey);
-
-    final fingerprintHex =
-        fingerprint.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
-    final fingerprintSha256Base64 =
-        base64.encode(fingerprintSha256).replaceAll('=', '');
+    final hostKeyVerificationDetails = _buildHostKeyVerificationDetails(
+      hostkey,
+    );
 
     // RFC 4251 Section 4.1: Implementations SHOULD try to make best effort to check host keys
     // Log both modern SHA256 (base64) and legacy MD5 (hex with colons) fingerprints.
     printDebug?.call(
-        'Server host key fingerprint: SHA256:$fingerprintSha256Base64 (MD5:$fingerprintHex) (${_hostkeyType?.name})');
+        'Server host key fingerprint: SHA256:${hostKeyVerificationDetails.fingerprintSha256Base64} (MD5:${hostKeyVerificationDetails.fingerprintMd5Hex}) (${_hostkeyType?.name})');
 
     final verificationFuture = Future.sync(() async {
       final handler = onVerifyHostKey;
       if (handler == null) {
         printDebug?.call(
-            'Host key verification handler not provided: accepting by default for backward compatibility');
-        return true;
+            '⚠️ Host key verification handler not provided: rejecting connection for security');
+        return false;
       }
 
-      final result = await handler(_hostkeyType!.name, fingerprint);
+      final result = await handler(hostKeyVerificationDetails);
       return result;
     });
 
@@ -1896,6 +1884,24 @@ class SSHTransport {
         closeWithError(
             error is SSHError ? error : SSHInternalError(error), stack);
       },
+    );
+  }
+
+  SSHHostKeyVerificationDetails _buildHostKeyVerificationDetails(
+    Uint8List hostkey,
+  ) {
+    if (hostkey.isEmpty) {
+      throw SSHStateError('Host key bytes are empty');
+    }
+    final fingerprintMd5 = MD5Digest().process(hostkey);
+    final fingerprintSha256 = SHA256Digest().process(hostkey);
+    return SSHHostKeyVerificationDetails(
+      type: _hostkeyType!.name,
+      hostKey: Uint8List.fromList(hostkey),
+      fingerprintMd5: fingerprintMd5,
+      fingerprintSha256: fingerprintSha256,
+      fingerprintSha256Base64:
+          base64.encode(fingerprintSha256).replaceAll('=', ''),
     );
   }
 

@@ -29,6 +29,25 @@ void main() {
       }
     });
 
+    test('rejecting the host key aborts authentication', () async {
+      final client = SSHClient(
+        await SSHSocket.connect(testSshHost, testSshPort),
+        username: 'demo',
+        onPasswordRequest: () => 'password',
+        onVerifyHostKey: (_) => false,
+      );
+      try {
+        await client.authenticated;
+        fail('should have thrown');
+      } catch (e) {
+        expect(e, isA<SSHAuthAbortError>());
+        final reason = (e as SSHAuthAbortError).reason;
+        expect(reason, isA<SSHHostkeyError>());
+      } finally {
+        client.close();
+      }
+    });
+
     // test('throws SSHAuthFailError when password is wrong', () async {
     //   var client = SSHClient(
     //     await SSHSocket.connect('test.rebex.net', 22),
