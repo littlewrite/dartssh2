@@ -660,7 +660,7 @@ class SftpFile {
 
     final endOffset = offset + length;
     final completedReads = <int, Uint8List?>{};
-    final completionQueue = Queue<(int startOffset, Uint8List? chunk)>();
+    final completionQueue = Queue<MapEntry<int, Uint8List?>>();
     var reservedOffset = offset;
     var bytesRead = 0;
     var nextOutputOffset = offset;
@@ -694,7 +694,7 @@ class SftpFile {
       _readChunk(requestLength, startOffset).then(
         (chunk) {
           pendingReadCount--;
-          completionQueue.add((startOffset, chunk));
+          completionQueue.add(MapEntry(startOffset, chunk));
           if (chunk != null &&
               chunk.isNotEmpty &&
               chunk.length < requestLength &&
@@ -735,7 +735,9 @@ class SftpFile {
 
     while (bytesRead < length) {
       while (completionQueue.isNotEmpty) {
-        final (startOffset, chunk) = completionQueue.removeFirst();
+        final completedRead = completionQueue.removeFirst();
+        final startOffset = completedRead.key;
+        final chunk = completedRead.value;
         completedReads[startOffset] = chunk;
       }
 
